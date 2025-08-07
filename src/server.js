@@ -1,0 +1,91 @@
+import dotenv from "dotenv";
+import express from "express";
+import compression from "compression";
+import cors from "cors";
+import path from "path";
+import fs from "fs";
+import { fileURLToPath, pathToFileURL } from "url";
+import { logger } from "./utils/logger.js";
+// Optional middlewares - remove if not needed
+// import authCheck from "./middlewares/auth-check.js";
+
+dotenv.config();
+
+const app = express();
+const PORT = process.env.PORT || 8000;
+
+// __dirname in ESM
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Core Middlewares
+app.set("trust proxy", 1);
+app.use(
+  cors({
+    origin: true,
+    credentials: true,
+  }),
+);
+app.use(express.json());
+app.use(
+  compression({
+    threshold: 1024,
+    filter: (req, res) => {
+      if (req.headers["x-no-compression"]) return false;
+      req.headers["accept-encoding"] = "gzip";
+      return compression.filter(req, res);
+    },
+  }),
+);
+
+// Flat Route Loader
+async function loadRoutesFlat() {
+  const routesDir = path.join(__dirname, "routes");
+  if (!fs.existsSync(routesDir)) {
+    logger.warn("⚠️ No routes folder found at:", routesDir);
+    return;
+  }
+
+  const routeFiles = fs.readdirSync(routesDir).filter((f) => f.endsWith(".js"));
+
+  for (const file of routeFiles) {
+    try {
+      const filePath = path.join(routesDir, file);
+      const mod = await import(pathToFileURL(filePath).href);
+      const router = mod.default;
+
+      if (typeof router !== "function") {
+        logger.warn(`⚠️ Skipped ${file} (no default export router)`);
+        continue;
+      }
+
+      app.use("/api/v1", router);
+      logger.info(`✅ Mounted routes from ${file} at /api/v1`);
+    } catch (err) {
+      logger.error(`❌ Error loading ${file}:`, err);
+    }
+  }
+
+  // Fallback 404
+  app.use((req, res) => {
+    res.status(404).json({
+      message: "Not Found",
+      url: req.originalUrl,
+    });
+  });
+
+  // Global Error Handler
+  app.use((_err, _req, res) => {
+    logger.error("💥 Internal Server Error:");
+    res.status(500).json({
+      message: "Something broke!",
+      status: 500,
+    });
+  });
+}
+
+loadRoutesFlat().then(() => {
+  app.listen(PORT, () => {
+    logger.info(`🚀 Server running at http://localhost:${PORT}`);
+  });
+});

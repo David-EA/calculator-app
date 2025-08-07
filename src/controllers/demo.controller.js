@@ -1,0 +1,16 @@
+export const demo = async (req, res, next) => {
+  try {
+    console.log("Demo route works!");
+    return res.status(200).json({
+      status: 200,
+      success: true,
+      message: "Demo route works!",
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: 500,
+      success: false,
+      message: error.message,
+    });
+  }
+};
